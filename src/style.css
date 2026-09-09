@@ -94,6 +94,44 @@ button.big:active { transform: translateY(3px); box-shadow: 0 2px 0 #b4451f; }
 
 .hint { font-size: 12px; opacity: 0.55; text-align: center; max-width: 340px; line-height: 1.5; }
 
+.who { display: flex; gap: 8px; }
+.who input { flex: 1; min-width: 0; }
+.who button {
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  border-radius: 12px;
+  border: 2px solid #59d4ff;
+  background: #12293a;
+  color: #59d4ff;
+  cursor: pointer;
+}
+.whoami { font-size: 13px; opacity: 0.85; display: flex; align-items: center; gap: 8px; }
+.whoami img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+.whoami button { background: none; border: none; color: #ff7a6b; font-size: 12px; font-weight: 700; cursor: pointer; }
+
+/* Garage: bottom sheet so the tank preview stays visible above it. */
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px max(16px, env(safe-area-inset-left)) max(20px, env(safe-area-inset-bottom));
+  background: rgba(13, 17, 28, 0.88);
+  backdrop-filter: blur(6px);
+  border-radius: 18px 18px 0 0;
+  z-index: 21;
+  max-height: 62vh;
+  overflow-y: auto;
+}
+.row.wrap { flex-wrap: wrap; justify-content: center; }
+.row.wrap button { flex: 0 0 auto; min-width: 0; padding: 8px 12px; font-size: 13px; }
+
 .linky {
   background: none;
   border: none;

@@ -7,10 +7,11 @@
     "dev": "vite --port 4460 --strictPort",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4460 --strictPort",
-    "shot": "node test/shot.mjs",
-    "test:race": "node test/race.mjs"
+    "test:race": "node test/race.mjs",
+    "test:garage": "node test/garage.mjs"
   },
   "dependencies": {
+    "nostr-tools": "^2.25.2",
     "three": "^0.185.1"
   },
   "devDependencies": {

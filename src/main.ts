@@ -6,7 +6,11 @@ import * as THREE from 'three'
 import { MAPS, Track, buildTrackMeshes, type MapDef } from './track'
 import { Race, TOTAL_LAPS, type ItemKind, type Racer } from './race'
 import { makeTank, applySkin, applyLabel, hueOf, type TankRig } from './tankmesh'
-import { SKINS, DEFAULT_SKIN, asSkin } from './skins'
+import {
+  SKINS, DEFAULT_SKIN, asSkin, skinFor, patternOf, finishOf,
+  PATTERNS, FINISHES, type SkinId, type Pattern, type FinishId,
+} from './skins'
+import { hasNip07, loginNip07, fetchProfile, fetchSharedSkin, publishSharedSkin } from './nostr'
 
 // ------------------------------------------------------------------ storage
 
@@ -37,8 +41,103 @@ const resultsEl = $('results')
 const resultsTitle = $('results-title')
 const standingsEl = $('standings')
 const touchEl = $('touch')
+const loginBtn = $<HTMLButtonElement>('login')
+const whoamiEl = $('whoami')
+const garageEl = $('garage')
+const patternsRow = $('patterns')
+const finishesRow = $('finishes')
+const skinBlurb = $('skin-blurb')
 
 nameInput.value = stored('tankspeed.name') ?? ''
+
+// ---------------------------------------------------------------- identity
+
+// Until login, identity is a per-device guest key: a stable random hue seed
+// standing in for the pubkey. Logging in replaces it with the real thing.
+function guestKey(): string {
+  let g = stored('tankspeed.guesthue')
+  if (!g) {
+    g = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0')
+    store('tankspeed.guesthue', g)
+  }
+  return g
+}
+
+let pubkey: string | null = stored('tankspeed.pubkey')
+let profileName: string | null = stored('tankspeed.profile.name')
+let profilePicture: string | null = stored('tankspeed.profile.picture')
+let currentSkin: SkinId = asSkin(stored('tankspeed.skin') ?? DEFAULT_SKIN)
+
+const myHue = (): number => hueOf(pubkey ?? guestKey())
+const myName = (): string => nameInput.value.trim() || profileName || 'anon'
+
+function renderWhoami(): void {
+  if (!pubkey) {
+    whoamiEl.hidden = true
+    loginBtn.hidden = false
+    return
+  }
+  loginBtn.hidden = true
+  whoamiEl.hidden = false
+  whoamiEl.innerHTML = ''
+  if (profilePicture) {
+    const img = document.createElement('img')
+    img.src = profilePicture
+    img.alt = ''
+    whoamiEl.appendChild(img)
+  }
+  const span = document.createElement('span')
+  span.textContent = `${profileName ?? 'nostr'} · ${pubkey.slice(0, 8)}…`
+  whoamiEl.appendChild(span)
+  const out = document.createElement('button')
+  out.textContent = 'logout'
+  out.addEventListener('click', () => {
+    pubkey = null
+    profileName = null
+    profilePicture = null
+    store('tankspeed.pubkey', '')
+    store('tankspeed.profile.name', '')
+    store('tankspeed.profile.picture', '')
+    renderWhoami()
+    refreshDisplayTank()
+  })
+  whoamiEl.appendChild(out)
+}
+
+loginBtn.addEventListener('click', async () => {
+  if (!hasNip07()) {
+    toast('No NIP-07 extension found')
+    return
+  }
+  try {
+    loginBtn.disabled = true
+    pubkey = await loginNip07()
+    store('tankspeed.pubkey', pubkey)
+    renderWhoami()
+    refreshDisplayTank()
+    // Profile and shared skin in parallel; both are best-effort.
+    const [profile, remoteSkin] = await Promise.all([
+      fetchProfile(pubkey),
+      fetchSharedSkin(pubkey),
+    ])
+    profileName = profile.name
+    profilePicture = profile.picture
+    store('tankspeed.profile.name', profileName ?? '')
+    store('tankspeed.profile.picture', profilePicture ?? '')
+    if (!nameInput.value.trim() && profileName) nameInput.value = profileName
+    if (remoteSkin) {
+      currentSkin = remoteSkin
+      store('tankspeed.skin', currentSkin)
+      renderGarageRows()
+    }
+    renderWhoami()
+    refreshDisplayTank()
+  } catch {
+    toast('Login failed')
+  } finally {
+    loginBtn.disabled = false
+  }
+})
 
 // ------------------------------------------------------------------- scene
 
@@ -150,6 +249,7 @@ for (const def of MAPS) {
     store('tankspeed.map', def.id)
     for (const other of mapsRow.children) other.classList.remove('picked')
     b.classList.add('picked')
+    startIdle()
   })
   mapsRow.appendChild(b)
 }
@@ -161,6 +261,54 @@ $('start').addEventListener('click', () => {
 $('again').addEventListener('click', () => startRace(pickedMap))
 $('menu').addEventListener('click', () => {
   resultsEl.hidden = true
+  lobby.hidden = false
+  startIdle()
+})
+
+// ------------------------------------------------------------------ garage
+
+let garageOpen = false
+
+function renderGarageRows(): void {
+  const pattern = patternOf(currentSkin)
+  const finish = finishOf(currentSkin)
+  const fill = (row: HTMLElement, ids: readonly string[], picked: string, apply: (id: string) => void) => {
+    row.innerHTML = ''
+    for (const id of ids) {
+      const b = document.createElement('button')
+      b.textContent = id === 'solid' ? 'Solid' : id[0].toUpperCase() + id.slice(1)
+      if (id === picked) b.classList.add('picked')
+      // The one impossible cell, same as the arena: carbon cannot carry a
+      // pattern (its trick is a near-black hull), so it greys out.
+      if (row === finishesRow && id === 'carbon' && pattern !== 'solid') b.disabled = true
+      b.addEventListener('click', () => {
+        apply(id)
+        store('tankspeed.skin', currentSkin)
+        renderGarageRows()
+        refreshDisplayTank()
+        if (pubkey) void publishSharedSkin(currentSkin).catch(() => {})
+      })
+      row.appendChild(b)
+    }
+  }
+  fill(patternsRow, PATTERNS, pattern, (id) => {
+    currentSkin = skinFor(id as Pattern, finishOf(currentSkin) === 'carbon' && id !== 'solid' ? 'matte' : finishOf(currentSkin))
+  })
+  fill(finishesRow, FINISHES, finish, (id) => {
+    currentSkin = skinFor(patternOf(currentSkin), id as FinishId)
+  })
+  skinBlurb.textContent = `${SKINS[currentSkin].label} — ${SKINS[currentSkin].blurb}`
+}
+
+$('garage-open').addEventListener('click', () => {
+  garageOpen = true
+  lobby.hidden = true
+  garageEl.hidden = false
+  renderGarageRows()
+})
+$('garage-done').addEventListener('click', () => {
+  garageOpen = false
+  garageEl.hidden = true
   lobby.hidden = false
 })
 
@@ -195,6 +343,10 @@ function clearRace(): void {
   bananaMeshes = []
   shellMeshes = []
   boxMeshes = []
+  if (displayTank) {
+    scene.remove(displayTank.root)
+    displayTank = null
+  }
 }
 
 function toast(text: string): void {
@@ -208,6 +360,8 @@ const ITEM_ICON: Record<ItemKind, string> = { banana: '🍌', shell: '🚀' }
 function startRace(def: MapDef): void {
   clearRace()
   lobby.hidden = true
+  garageEl.hidden = true
+  garageOpen = false
   resultsEl.hidden = true
   resultsShown = false
 
@@ -217,18 +371,7 @@ function startRace(def: MapDef): void {
   scene.background = new THREE.Color(def.sky)
   scene.fog = new THREE.Fog(def.fog, 900, 3600)
 
-  const name = nameInput.value.trim() || 'anon'
-  // Until login ships, identity is a per-device guest: a stable random "hue
-  // key" standing in for the pubkey the NIP-07 push will supply.
-  let guest = stored('tankspeed.guesthue')
-  if (!guest) {
-    guest = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0')
-    store('tankspeed.guesthue', guest)
-  }
-  const hue = hueOf(guest)
-  const skin = asSkin(stored('tankspeed.skin') ?? DEFAULT_SKIN)
-
-  race = new Race(track, name, hue, skin, {
+  race = new Race(track, myName(), myHue(), currentSkin, {
     onPickup: (r, item) => {
       if (r.kind === 'player') {
         itemEl.textContent = ITEM_ICON[item]
@@ -421,6 +564,8 @@ function frame(now: number): void {
         showResults()
       }
     }
+  } else {
+    idleCamera(dt)
   }
 
   renderer.render(scene, camera)
@@ -470,31 +615,71 @@ window.__ts = {
       trackLength: race.track.length,
       playerDone: race.playerDone,
       countdown,
+      skin: p.skin,
+      hue: p.hue,
+      name: p.name,
     }
   },
   autopilot: (on: boolean) => { if (race) race.autopilot = on },
   skipCountdown: () => { countdown = Math.min(countdown, 0.01) },
   sideCam: (on: boolean) => { sideCam = on },
+  skin: () => currentSkin,
+  identity: () => ({ pubkey, name: myName(), hue: myHue() }),
 }
 
-// A gentle idle scene behind the lobby: the first map slowly orbited.
-{
+// ------------------------------------------------------------- idle scene
+// The lobby backdrop: the picked map slowly orbited, with the player's own
+// tank parked on the start line wearing the current skin — which is also the
+// garage's live preview when the garage sheet is open.
+
+let displayTank: TankRig | null = null
+let idleAngle = 0
+let idleAnchor = new THREE.Vector3()
+
+function refreshDisplayTank(): void {
+  if (!displayTank) return
+  applySkin(displayTank, SKINS[currentSkin], myHue())
+  applyLabel(displayTank, myName(), myHue())
+}
+
+function startIdle(): void {
+  race = null
+  clearRace()
+  hud.hidden = true
+  touchEl.classList.remove('racing')
+
   const track = new Track(pickedMap)
   trackGroup = buildTrackMeshes(track)
   scene.add(trackGroup)
   scene.background = new THREE.Color(pickedMap.sky)
   scene.fog = new THREE.Fog(pickedMap.fog, 900, 3600)
-  camPos.set(0, 700, 1400)
-  camAim.set(0, 0, 0)
-  camera.position.copy(camPos)
-  camera.lookAt(camAim)
-  let angle = 0
-  const idle = (): void => {
-    if (race) return
-    angle += 0.0012
-    camera.position.set(Math.sin(angle) * 1400, 700, Math.cos(angle) * 1400)
-    camera.lookAt(0, 0, 0)
-    requestAnimationFrame(idle)
-  }
-  requestAnimationFrame(idle)
+
+  const s0 = track.at(0)
+  displayTank = makeTank()
+  displayTank.root.position.set(s0.x, 0, s0.z)
+  displayTank.root.rotation.y = Math.atan2(-s0.tz, s0.tx)
+  scene.add(displayTank.root)
+  refreshDisplayTank()
+  idleAnchor.set(s0.x, 0, s0.z)
 }
+
+function idleCamera(dt: number): void {
+  idleAngle += dt * 0.08
+  if (garageOpen && displayTank) {
+    // Close orbit around the tank so the garage reads as a showroom.
+    const r = 150
+    const t = displayTank.root.position
+    camera.position.set(t.x + Math.sin(idleAngle * 3) * r, 70, t.z + Math.cos(idleAngle * 3) * r)
+    camera.lookAt(t.x, 22, t.z)
+  } else {
+    camera.position.set(
+      idleAnchor.x + Math.sin(idleAngle) * 900,
+      420,
+      idleAnchor.z + Math.cos(idleAngle) * 900,
+    )
+    camera.lookAt(idleAnchor.x, 0, idleAnchor.z)
+  }
+}
+
+renderWhoami()
+startIdle()

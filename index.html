@@ -17,16 +17,35 @@
     <div id="lobby" class="panel">
       <h1>TANK<span>SPEED</span></h1>
       <p class="tag">Kart racing with tanks. Drop bananas. Fire shells.</p>
-      <label class="field">
-        <span>Racer name</span>
-        <input id="name" maxlength="16" placeholder="anon" autocomplete="off" />
-      </label>
+      <div class="field">
+        <span>Racer</span>
+        <div id="who" class="who">
+          <input id="name" maxlength="16" placeholder="anon" autocomplete="off" />
+          <button id="login" title="Login with a NIP-07 extension">LOGIN</button>
+        </div>
+        <div id="whoami" class="whoami" hidden></div>
+      </div>
       <div class="field">
         <span>Track</span>
         <div id="maps" class="row"></div>
       </div>
       <button id="start" class="big">RACE</button>
+      <button id="garage-open" class="linky">🛠 garage — pick your skin</button>
       <p class="hint">Drive: WASD / arrows · item: space · Mobile: auto-gas, steer with the pads, tap the item button.</p>
+    </div>
+
+    <!-- Garage: skin picker over a live tank preview. -->
+    <div id="garage" class="sheet" hidden>
+      <div class="field">
+        <span>Pattern</span>
+        <div id="patterns" class="row wrap"></div>
+      </div>
+      <div class="field">
+        <span>Finish</span>
+        <div id="finishes" class="row wrap"></div>
+      </div>
+      <p id="skin-blurb" class="hint"></p>
+      <button id="garage-done" class="big">DONE</button>
     </div>
 
     <!-- HUD -->
